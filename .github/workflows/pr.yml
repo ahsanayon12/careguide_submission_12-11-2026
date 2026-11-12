@@ -1,0 +1,174 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  IMAGE_NAME: careguide-api
+
+jobs:
+  lint-test:
+    name: Lint, test & coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Unit tests with coverage
+        run: |
+          python -m pytest --cov=app --cov-report=term-missing --cov-report=xml \
+            --junitxml=pytest-report.xml
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          r = ET.parse("coverage.xml").getroot()
+          print(f"### Test coverage: {float(r.get('line-rate')) * 100:.1f}%")
+          EOF
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            pytest-report.xml
+
+  lint-infra:
+    name: Dockerfile, shell, Terraform & K8s lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - name: ShellCheck (all *.sh, including Terraform templates)
+        run: |
+          shellcheck --version
+          find . -type f \( -name '*.sh' -o -name '*.sh.tftpl' \) -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck --severity=style --shell=bash
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Terraform fmt & validate (all stacks)
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive
+          for stack in bootstrap global app; do
+            echo "::group::validate $stack"
+            terraform -chdir="$stack" init -backend=false -input=false
+            terraform -chdir="$stack" validate
+            echo "::endgroup::"
+          done
+
+      - name: Prometheus config, rules & alert unit tests (promtool)
+        run: |
+          docker run --rm -v "$PWD/monitoring/prometheus:/p:ro" --entrypoint promtool \
+            prom/prometheus:v3.5.0 check rules /p/rules/alerts.yml
+          docker run --rm -v "$PWD/monitoring/prometheus:/p:ro" --entrypoint promtool \
+            prom/prometheus:v3.5.0 test rules /p/tests/alerts_test.yml
+
+      - name: Alloy config syntax
+        run: |
+          docker run --rm -v "$PWD/monitoring/alloy:/a:ro" grafana/alloy:v1.10.2 fmt /a/config.alloy >/dev/null
+
+      - name: Docker Compose config
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.monitoring.yml config -q
+
+      - name: Kubernetes manifest validation (kubeconform)
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          kubectl kustomize k8s | ./kubeconform -strict -summary -ignore-missing-schemas -
+
+  build-scan:
+    name: Build image & Trivy scan
+    runs-on: ubuntu-24.04
+    needs: [lint-test]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (amd64, loaded locally for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          load: true
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number || github.run_number }}
+          build-args: |
+            APP_VERSION=pr-${{ github.sha }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report image size
+        run: |
+          docker image ls ${{ env.IMAGE_NAME }} --format 'Image size: {{.Size}}' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Container smoke test
+        run: |
+          docker run -d --name smoke -p 8080:8080 \
+            ${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number || github.run_number }}
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:8080/health && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/ | tee /dev/stderr | grep -q "Hello from DevOps Task!"
+          curl -fsS http://localhost:8080/metrics | grep -q http_requests_total
+          docker stop smoke
+
+      - name: Trivy vulnerability scan (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number || github.run_number }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Trivy misconfiguration scan (Dockerfile, Terraform, K8s) - informational
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "0"

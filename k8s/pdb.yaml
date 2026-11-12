@@ -1,0 +1,12 @@
+# Keeps at least one pod serving during voluntary disruptions (node drain, cluster upgrade).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: careguide-api
+  labels:
+    app.kubernetes.io/name: careguide-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: careguide-api

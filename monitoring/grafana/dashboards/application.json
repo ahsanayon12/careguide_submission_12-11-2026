@@ -1,0 +1,764 @@
+{
+  "uid": "careguide-app",
+  "title": "CareGuide - Application",
+  "description": "Request rate, errors, latency (p50/p95/p99) with correlated Loki logs.",
+  "tags": [
+    "careguide",
+    "app"
+  ],
+  "timezone": "browser",
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "path",
+        "label": "Path (logs)",
+        "type": "custom",
+        "query": "/,/health,/metrics,unmatched,/chaos/error",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "CareGuide dashboards",
+      "type": "dashboards",
+      "tags": [
+        "careguide"
+      ],
+      "asDropdown": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Golden signals",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Status",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN"
+                },
+                "1": {
+                  "text": "UP"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"careguide-app\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Request rate",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Error rate (5xx)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 9,
+        "y": 1,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(http_request_errors_total{job=\"careguide-app\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(http_requests_total{job=\"careguide-app\"}[$__rate_interval])), 1e-9)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "p95 latency",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 1,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.25
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "In-flight requests",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 1,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(http_requests_in_progress{job=\"careguide-app\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request rate by path & status",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (path, status) (rate(http_requests_total{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval]))",
+          "legendFormat": "{{path}} {{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Error rate (5xx ratio)",
+      "description": "Red band = CareGuideHighErrorRate alert threshold (5%).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(http_request_errors_total{job=\"careguide-app\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(http_requests_total{job=\"careguide-app\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "error ratio",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (path) (rate(http_request_errors_total{job=\"careguide-app\"}[$__rate_interval]))",
+          "legendFormat": "errors/s {{path}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "p95 latency by path",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, path) (rate(http_request_duration_seconds_bucket{job=\"careguide-app\",path!=\"/metrics\"}[$__rate_interval])))",
+          "legendFormat": "{{path}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Logs - investigate spikes here (same time range as the graphs above)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "logs",
+      "title": "Error & warning logs",
+      "description": "Click a line to see all fields (path, status, duration_ms, exc_info).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 10
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"app\", level=~\"error|warn|critical\"} | json | line_format \"{{.status}} {{.method}} {{.path}} {{.msg}} {{.exc_info}}\"",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "logs",
+      "title": "All request logs (filter by path)",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 10
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"app\"} | path=~\"$path\" | json | line_format \"{{.level}} {{.status}} {{.method}} {{.path}} {{.duration_ms}}ms\"",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Log volume by level",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            },
+            "showPoints": "never",
+            "drawStyle": "bars"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level) (count_over_time({service=\"app\"}[$__auto]))",
+          "legendFormat": "{{level}}",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          }
+        }
+      ]
+    }
+  ]
+}

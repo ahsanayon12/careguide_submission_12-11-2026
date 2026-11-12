@@ -1,0 +1,203 @@
+# Observability stack. Run together with the app:
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --build
+# Optional Alertmanager -> Slack (bonus):
+#   add  --profile alerting  and create ./monitoring/alertmanager/secrets/slack_webhook_url
+#
+# Network layout:
+#   monitoring      internal-only (no host access, no egress) - all backends talk here
+#   grafana_public  the ONLY network with a published port (Grafana :3000)
+#   egress          Alertmanager only, so it can reach Slack
+name: careguide
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  # Attach the app to the internal monitoring network so Prometheus can scrape app:8080.
+  app:
+    networks:
+      - app
+      - monitoring
+
+  prometheus:
+    <<: *hardening
+    image: prom/prometheus:v3.5.0
+    container_name: prometheus
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+    networks: [monitoring]
+
+  loki:
+    <<: *hardening
+    image: grafana/loki:3.5.3
+    container_name: loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    # No healthcheck: the Loki image ships without a shell/wget. Readiness is visible at
+    # loki:3100/ready and via the `up{job="loki"}` metric; clients (Alloy) retry on their own.
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+    networks: [monitoring]
+
+  alloy:
+    <<: *hardening
+    image: grafana/alloy:v1.10.2
+    container_name: alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Read-only Docker API access for container discovery + log tailing.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+    networks: [monitoring]
+
+  node-exporter:
+    <<: *hardening
+    image: prom/node-exporter:v1.9.1
+    container_name: node-exporter
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+|var/lib/containerd/.+)($|/)
+      - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|pstore|rpc_pipefs|securityfs|squashfs|sysfs|tmpfs|tracefs)$
+    # Host PID namespace so process/CPU stats reflect the host, not this container.
+    pid: host
+    read_only: true
+    cap_drop: [ALL]
+    volumes:
+      # Whole host filesystem, read-only, rslave so newly mounted volumes are seen.
+      - /:/host:ro,rslave
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M }
+    networks: [monitoring]
+
+  cadvisor:
+    <<: *hardening
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: cadvisor
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=15s
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service,com.docker.compose.project
+      # Drop high-cardinality / unused metric families.
+      - --disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb,referenced_memory,cpu_topology,resctrl,advtcp,process
+    # Not privileged: read-only mounts + /dev/kmsg are enough for container CPU/memory/network
+    # on cgroup v2 hosts. If your host shows no container metrics, see README (Observability > cAdvisor).
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+    networks: [monitoring]
+
+  grafana:
+    <<: *hardening
+    image: grafana/grafana:12.1.1
+    container_name: grafana
+    user: "472:0"
+    ports:
+      - "3000:3000" # the only port of the monitoring stack exposed to the host
+    environment:
+      # Required, no defaults: compose fails fast if they are missing from .env
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?set GRAFANA_ADMIN_USER in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/application.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+    networks: [monitoring, grafana_public]
+
+  # ---- Bonus: Alertmanager routing to Slack (opt-in via --profile alerting) ----
+  alertmanager:
+    <<: *hardening
+    image: prom/alertmanager:v0.28.1
+    container_name: alertmanager
+    profiles: [alerting]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    secrets:
+      - source: slack_webhook_url
+        target: /etc/alertmanager/secrets/slack_webhook_url
+    networks: [monitoring, egress]
+
+secrets:
+  slack_webhook_url:
+    file: ./monitoring/alertmanager/secrets/slack_webhook_url
+
+volumes:
+  prometheus_data:
+  loki_data:
+  alloy_data:
+  grafana_data:
+  alertmanager_data:
+
+networks:
+  monitoring:
+    name: careguide_monitoring
+    internal: true
+  grafana_public:
+    name: careguide_grafana_public
+  egress:
+    name: careguide_egress

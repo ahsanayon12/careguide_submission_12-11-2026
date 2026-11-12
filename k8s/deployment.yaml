@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: careguide-api
+  labels:
+    app.kubernetes.io/name: careguide-api
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2 # HPA takes over from here (min 2)
+  revisionHistoryLimit: 5 # how far back `kubectl rollout undo --to-revision` can go
+  minReadySeconds: 5
+  progressDeadlineSeconds: 120 # rollout marked failed if new pods are not ready in time
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0 # never drop below desired capacity => zero downtime
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: careguide-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: careguide-api
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: careguide-api
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: careguide-api
+      containers:
+        - name: api
+          image: careguide-api # tag set by kustomization.yaml `images:`
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: careguide-config
+          # APP_VERSION is baked into the image at build time (Dockerfile build-arg),
+          # so changing the image tag alone changes the version reported by GET /.
+          env:
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: careguide-secrets
+                  key: API_TOKEN
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15 # up to 30s to start
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Give kube-proxy/ingress time to remove the pod from endpoints before SIGTERM.
+              # Native sleep action: distroless has no /bin/sleep.
+              sleep:
+                seconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

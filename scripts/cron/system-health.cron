@@ -1,0 +1,7 @@
+# Alternative to the systemd timer. Install with:
+#   sudo install -m 0644 scripts/cron/system-health.cron /etc/cron.d/system-health
+# Runs every 5 minutes as root; warnings/criticals go to stderr -> cron mail / syslog.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/5 * * * * root /usr/local/bin/system_health.sh --quiet --json --log-file /var/log/system-health/health_log.txt

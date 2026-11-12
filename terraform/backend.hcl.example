@@ -1,0 +1,6 @@
+# Copy to backend.hcl (shared by all stacks) and set your bucket from terraform/bootstrap.
+# The state `key` is passed per stack / per environment on `terraform init`.
+bucket       = "careguide-tfstate-<your-unique-suffix>"
+region       = "ap-southeast-1"
+encrypt      = true
+use_lockfile = true # S3-native state locking (Terraform >= 1.10)

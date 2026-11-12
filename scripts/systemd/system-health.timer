@@ -1,0 +1,12 @@
+[Unit]
+Description=Run system-health.service every 5 minutes
+
+[Timer]
+# Every 5 minutes on the wall-clock grid (:00, :05, ...); Persistent catches up after downtime.
+OnCalendar=*:0/5
+Persistent=true
+AccuracySec=15s
+RandomizedDelaySec=10s
+
+[Install]
+WantedBy=timers.target

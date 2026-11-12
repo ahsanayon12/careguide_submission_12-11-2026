@@ -1,0 +1,46 @@
+# Bonus: routes Prometheus alerts to Slack. The webhook URL is read from a Docker secret
+# file (git-ignored), never committed:
+#   echo 'https://hooks.slack.com/services/XXX/YYY/ZZZ' > monitoring/alertmanager/secrets/slack_webhook_url
+global:
+  resolve_timeout: 5m
+  slack_api_url_file: /etc/alertmanager/secrets/slack_webhook_url
+
+route:
+  receiver: slack-warnings
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: slack-critical
+      repeat_interval: 1h
+
+inhibit_rules:
+  # If the app is down, don't also page for its error rate / latency.
+  - source_matchers: [alertname="CareGuideAppDown"]
+    target_matchers: [alertname=~"CareGuideHighErrorRate|CareGuideHighLatencyP95"]
+  # Critical disk supersedes warning disk on the same mount.
+  - source_matchers: [alertname="HostDiskUsageCritical"]
+    target_matchers: [alertname="HostDiskUsageHigh"]
+    equal: [mountpoint]
+
+receivers:
+  - name: slack-critical
+    slack_configs:
+      - channel: "#careguide-alerts"
+        send_resolved: true
+        title: ':rotating_light: [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}*{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}
+  - name: slack-warnings
+    slack_configs:
+      - channel: "#careguide-alerts"
+        send_resolved: true
+        title: ':warning: [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}*{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}

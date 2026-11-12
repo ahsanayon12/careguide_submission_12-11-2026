@@ -1,0 +1,23 @@
+# Requires ingress-nginx (see README). Alternative without an ingress controller:
+#   kubectl -n careguide port-forward svc/careguide-api 8080:80
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: careguide-api
+  labels:
+    app.kubernetes.io/name: careguide-api
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: careguide.localtest.me # *.localtest.me resolves to 127.0.0.1 - no /etc/hosts edit needed
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: careguide-api
+                port:
+                  name: http

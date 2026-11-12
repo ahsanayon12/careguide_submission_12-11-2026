@@ -1,0 +1,95 @@
+# Unit tests for alert rules:  promtool test rules monitoring/prometheus/tests/alerts_test.yml
+rule_files:
+  - ../rules/alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: app down fires after 1m, not before
+    interval: 1m
+    input_series:
+      - series: 'up{job="careguide-app", instance="app:8080"}'
+        values: "1 0 0 0"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: CareGuideAppDown
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: CareGuideAppDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: careguide-app, instance: "app:8080" }
+            exp_annotations:
+              summary: "CareGuide API is down"
+              description: "Prometheus has failed to scrape app:8080 for more than 1 minute."
+              runbook: "docker compose ps app; docker compose logs --tail=100 app"
+
+  - name: high error rate (10% errors) fires after 5m
+    interval: 1m
+    input_series:
+      # 60 req/min total, 6 errors/min => 10% error ratio, 1 req/s (above the 0.1 req/s floor)
+      - series: 'http_requests_total{job="careguide-app", path="/", method="GET", status="200"}'
+        values: "0+54x15"
+      - series: 'http_requests_total{job="careguide-app", path="/", method="GET", status="500"}'
+        values: "0+6x15"
+      - series: 'http_request_errors_total{job="careguide-app", path="/", method="GET"}'
+        values: "0+6x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CareGuideHighErrorRate
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CareGuideHighErrorRate
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "CareGuide API 5xx error rate above 5%"
+              description: "10% of requests failed over the last 5 minutes."
+              runbook: "Open the Application dashboard and check the error logs panel."
+
+  - name: low traffic does not page even with errors
+    interval: 1m
+    input_series:
+      # 1 request/min, all failing => 100% errors but only 0.017 req/s (below floor)
+      - series: 'http_requests_total{job="careguide-app", path="/", method="GET", status="500"}'
+        values: "0+1x15"
+      - series: 'http_request_errors_total{job="careguide-app", path="/", method="GET"}'
+        values: "0+1x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: CareGuideHighErrorRate
+        exp_alerts: []
+
+  - name: disk above 80% warns, not critical
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_size_bytes{instance="node-exporter:9100", mountpoint="/", fstype="ext4", device="/dev/sda1"}'
+        values: "100x20"
+      - series: 'node_filesystem_avail_bytes{instance="node-exporter:9100", mountpoint="/", fstype="ext4", device="/dev/sda1"}'
+        values: "15x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: HostDiskUsageHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: "node-exporter:9100", mountpoint: "/", fstype: ext4, device: /dev/sda1 }
+            exp_annotations:
+              summary: "Disk usage above 80% on /"
+              description: "/ is 85.0% full."
+      - eval_time: 15m
+        alertname: HostDiskUsageCritical
+        exp_alerts: []
+
+  - name: container memory near limit
+    interval: 1m
+    input_series:
+      - series: 'container_memory_working_set_bytes{name="careguide-app"}'
+        values: "240000000x10"
+      - series: 'container_spec_memory_limit_bytes{name="careguide-app"}'
+        values: "256000000x10"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ContainerMemoryNearLimit
+        exp_alerts:
+          - exp_labels: { severity: warning, name: careguide-app }
+            exp_annotations:
+              summary: "Container careguide-app memory above 90% of its limit"
+              description: "careguide-app is at 93.8% of its memory limit - OOM kill likely."

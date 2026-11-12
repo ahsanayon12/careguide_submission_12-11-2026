@@ -1,0 +1,33 @@
+# Install (see README > Health script):
+#   sudo install -m 0755 scripts/system_health.sh /usr/local/bin/system_health.sh
+#   sudo cp scripts/systemd/system-health.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now system-health.timer
+[Unit]
+Description=Host health check (CPU, memory, disk, load)
+Documentation=https://github.com/<your-github-user>/CareGuide#step-6-linux-automation
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Exit 1 (warning) and 2 (critical) are expected results, not unit failures;
+# they are still visible in `journalctl -u system-health` and in the log file.
+SuccessExitStatus=1 2
+ExecStart=/usr/local/bin/system_health.sh --quiet --json --log-file /var/log/system-health/health_log.txt
+# Optional webhook (bonus): put HEALTH_WEBHOOK_URL=https://... in this root-only file.
+EnvironmentFile=-/etc/default/system-health
+
+# Hardening: run unprivileged with a private, read-only view of the system.
+DynamicUser=yes
+LogsDirectory=system-health
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=64M
+CPUQuota=20%
+Nice=10

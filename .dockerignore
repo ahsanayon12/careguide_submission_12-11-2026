@@ -1,0 +1,28 @@
+# Keep the build context minimal: only app/, tests/, requirements*.txt, pyproject.toml are needed.
+.git
+.github
+.gitignore
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+.venv
+venv
+.env
+.env.*
+*.log
+health_log.txt*
+
+# Infra / docs are not part of the image
+terraform
+k8s
+monitoring
+scripts
+docs
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore

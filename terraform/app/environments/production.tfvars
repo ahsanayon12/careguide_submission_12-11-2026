@@ -1,0 +1,9 @@
+environment         = "production"
+aws_region          = "ap-southeast-1"
+instance_type       = "t3.small"
+architecture        = "x86_64"
+root_volume_size    = 20
+log_retention_days  = 30
+detailed_monitoring = true
+allowed_http_cidrs  = ["0.0.0.0/0"] # in real production: ALB/CloudFront CIDRs only
+image_tag           = "1.0.0"

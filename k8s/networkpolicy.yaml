@@ -1,0 +1,24 @@
+# Default-deny ingress for the namespace, then allow only the ingress controller and
+# in-namespace traffic (e.g. port-forward, Prometheus in a later step) to reach port 8080.
+# Enforced by kind >= 0.24 (kindnet) / Calico / Cilium; ignored by CNIs without NetworkPolicy support.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: careguide-api-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: careguide-api
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        - podSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP

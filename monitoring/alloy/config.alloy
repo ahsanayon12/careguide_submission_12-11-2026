@@ -1,0 +1,110 @@
+// Grafana Alloy: discover all Docker containers, tail their logs, parse the app's JSON logs,
+// and ship everything to Loki.
+//
+// Label strategy (low cardinality, see README):
+//   labels (indexed):       service, container, level, stream   -> bounded, a handful of values each
+//   structured metadata:    path, method, status, logger        -> filterable, NOT indexed
+//   never labels:           duration_ms, client, ts, msg        -> unbounded
+
+discovery.docker "containers" {
+	host             = "unix:///var/run/docker.sock"
+	refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+	targets = discovery.docker.containers.targets
+
+	// container name without the leading "/"
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+
+	// compose service name (app, prometheus, loki, ...)
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	// stdout / stderr
+	rule {
+		source_labels = ["__meta_docker_container_log_stream"]
+		target_label  = "stream"
+	}
+}
+
+loki.source.docker "containers" {
+	host             = "unix:///var/run/docker.sock"
+	targets          = discovery.docker.containers.targets
+	relabel_rules    = discovery.relabel.containers.rules
+	forward_to       = [loki.process.pipeline.receiver]
+	refresh_interval = "15s"
+}
+
+loki.process "pipeline" {
+	// Parse structured JSON logs from the CareGuide app only.
+	stage.match {
+		selector = "{service=\"app\"}"
+
+		stage.json {
+			expressions = {
+				level  = "level",
+				path   = "path",
+				method = "method",
+				status = "status",
+				logger = "logger",
+				ts     = "ts",
+			}
+		}
+
+		// Use the app's own timestamp instead of the time Alloy read the line.
+		stage.timestamp {
+			source = "ts"
+			format = "RFC3339Nano"
+		}
+
+		// Python emits "warning"; normalize to "warn" so all services share one value.
+		stage.replace {
+			source     = "level"
+			expression = "^(warning)$"
+			replace    = "warn"
+		}
+
+		// `level` has ~5 values -> safe as an indexed label.
+		stage.labels {
+			values = {level = ""}
+		}
+
+		// Request fields as structured metadata: filterable (| path="/") without new streams.
+		stage.structured_metadata {
+			values = {
+				path   = "",
+				method = "",
+				status = "",
+				logger = "",
+			}
+		}
+	}
+
+	// Best-effort level for other containers' logs (Prometheus/Loki/Grafana use logfmt level=...).
+	stage.match {
+		selector = "{service!=\"app\"}"
+
+		stage.regex {
+			expression = "level=(?P<level>debug|info|warn|error|fatal)"
+		}
+
+		stage.labels {
+			values = {level = ""}
+		}
+	}
+
+	forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}

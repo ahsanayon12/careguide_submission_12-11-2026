@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Terraform template: placeholders are rendered by templatefile() before the shell runs.
+# shellcheck disable=SC2016,SC2154
+# EC2 bootstrap (Amazon Linux 2023). Rendered by Terraform templatefile().
+# Installs Docker, writes deploy config + script, and starts the app container.
+set -euo pipefail
+exec > >(tee -a /var/log/careguide-bootstrap.log) 2>&1
+
+echo "bootstrap start: environment=${environment}"
+
+dnf -y update --security
+dnf -y install docker
+systemctl enable --now docker
+
+# Docker daemon defaults: bounded local logs for anything not using awslogs, live-restore so
+# daemon restarts (e.g. security updates) don't kill the app container.
+cat > /etc/docker/daemon.json <<'JSON'
+{
+  "live-restore": true,
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+JSON
+systemctl restart docker
+
+install -d -m 0750 /etc/careguide /opt/careguide
+
+cat > /etc/careguide/deploy.env <<'ENV'
+AWS_REGION=${aws_region}
+ECR_REGISTRY=${ecr_registry}
+ECR_REPO=${ecr_repo}
+ENVIRONMENT=${environment}
+LOG_GROUP=${log_group}
+ENV
+chmod 0640 /etc/careguide/deploy.env
+
+echo '${deploy_script}' | base64 -d > /opt/careguide/deploy.sh
+chmod 0750 /opt/careguide/deploy.sh
+
+# First deploy. If the image does not exist yet (CI has not pushed), keep booting; CI will deploy.
+/opt/careguide/deploy.sh '${image_tag}' || echo "initial deploy failed - waiting for CI to deploy"
+
+echo "bootstrap complete"

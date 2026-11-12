@@ -1,0 +1,109 @@
+# Threshold and `for` reasoning is documented in README > Observability > Alerting.
+groups:
+  - name: careguide-app
+    rules:
+      - alert: CareGuideAppDown
+        expr: up{job="careguide-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CareGuide API is down"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for more than 1 minute."
+          runbook: "docker compose ps app; docker compose logs --tail=100 app"
+
+      - alert: CareGuideHighErrorRate
+        expr: |
+          (
+            sum(rate(http_request_errors_total{job="careguide-app"}[5m]))
+            /
+            sum(rate(http_requests_total{job="careguide-app"}[5m]))
+          ) > 0.05
+          and
+          sum(rate(http_requests_total{job="careguide-app"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CareGuide API 5xx error rate above 5%"
+          description: "{{ $value | humanizePercentage }} of requests failed over the last 5 minutes."
+          runbook: "Open the Application dashboard and check the error logs panel."
+
+      - alert: CareGuideHighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{job="careguide-app", path!="/metrics"}[5m]))
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CareGuide API p95 latency above 500ms"
+          description: "p95 latency is {{ $value | humanizeDuration }} for 10 minutes."
+
+  - name: host
+    rules:
+      - alert: HostDiskUsageHigh
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk usage above 80% on {{ $labels.mountpoint }}"
+          description: "{{ $labels.mountpoint }} is {{ $value | printf \"%.1f\" }}% full."
+
+      - alert: HostDiskUsageCritical
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk usage above 90% on {{ $labels.mountpoint }}"
+          description: "{{ $labels.mountpoint }} is {{ $value | printf \"%.1f\" }}% full."
+
+      - alert: HostHighCpuUsage
+        expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host CPU above 90% for 15 minutes"
+          description: "CPU usage is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: HostMemoryUsageHigh
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory above 90%"
+          description: "Memory usage is {{ $value | printf \"%.1f\" }}%."
+
+  - name: containers
+    rules:
+      - alert: ContainerMemoryNearLimit
+        expr: |
+          (
+            container_memory_working_set_bytes{name!=""}
+            / on (name)
+            (container_spec_memory_limit_bytes{name!=""} > 0)
+          ) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} memory above 90% of its limit"
+          description: "{{ $labels.name }} is at {{ $value | printf \"%.1f\" }}% of its memory limit - OOM kill likely."
+
+  - name: monitoring-self
+    rules:
+      - alert: ScrapeTargetDown
+        expr: up{job!="careguide-app"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Monitoring target {{ $labels.job }} is down"
+          description: "{{ $labels.instance }} has not been scraped for 5 minutes."

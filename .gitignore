@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+# Secrets / local config
+.env
+*.tfvars.local
+k8s/secret.yaml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Health script output
+health_log.txt*
+
+# Alertmanager webhook secret
+monitoring/alertmanager/secrets/*
+!monitoring/alertmanager/secrets/.gitkeep

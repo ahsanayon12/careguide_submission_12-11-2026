@@ -1,0 +1,9 @@
+environment         = "staging"
+aws_region          = "ap-southeast-1"
+instance_type       = "t3.micro"
+architecture        = "x86_64"
+root_volume_size    = 16
+log_retention_days  = 14
+detailed_monitoring = false
+allowed_http_cidrs  = ["0.0.0.0/0"]
+image_tag           = "1.0.0"

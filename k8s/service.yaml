@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: careguide-api
+  labels:
+    app.kubernetes.io/name: careguide-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: careguide-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
